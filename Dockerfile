@@ -37,7 +37,8 @@ COPY --from=builder /usr/local/bin/warmup /usr/local/bin/warmup
 ARG EMBEDDING_MODELS=nomic,bge-small
 RUN EMBEDDING_MODELS="${EMBEDDING_MODELS}" EMBEDDING_POOL_SIZE=1 /usr/local/bin/warmup
 
-ARG EMBEDDING_PORT=3000
-EXPOSE ${EMBEDDING_PORT}
+# EXPOSE is build-time metadata only; the actual port is controlled by the
+# EMBEDDING_PORT env var at runtime (default 3000).
+EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/embedding"]

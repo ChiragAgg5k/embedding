@@ -82,7 +82,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let app = Router::new().route("/embed", post(embed)).with_state(state);
 
-    let port = std::env::var("EMBEDDING_PORT").unwrap_or_else(|_| "3000".to_string());
+    let port_str = std::env::var("EMBEDDING_PORT").unwrap_or_else(|_| "3000".to_string());
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| format!("EMBEDDING_PORT '{}' is not a valid port number (1-65535)", port_str))?;
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("listening on {}", addr);
