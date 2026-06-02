@@ -37,6 +37,7 @@ COPY --from=builder /usr/local/bin/warmup /usr/local/bin/warmup
 ARG EMBEDDING_MODELS=nomic,bge-small
 RUN EMBEDDING_MODELS="${EMBEDDING_MODELS}" EMBEDDING_POOL_SIZE=1 /usr/local/bin/warmup
 
-EXPOSE 3000
+ARG EMBEDDING_PORT=3000
+EXPOSE ${EMBEDDING_PORT}
 
 ENTRYPOINT ["/usr/local/bin/embedding"]

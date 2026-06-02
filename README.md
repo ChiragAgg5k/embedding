@@ -16,6 +16,17 @@ curl -X POST http://localhost:3000/embed \
   -d '{"texts":["hello world","another piece of text"]}'
 ```
 
+## Configuration
+
+Configured via environment variables (set them in `.env`):
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `EMBEDDING_PORT` | `3000` | Port the service listens on. |
+| `EMBEDDING_MODELS` | `nomic` | Comma-separated list of models to load. |
+| `EMBEDDING_CACHE_DIR` | _(default cache)_ | Directory for downloaded model files. |
+| `EMBEDDING_POOL_SIZE` | _(memory-derived)_ | Number of model instances per pool. |
+
 ## API
 
 ### `POST /embed`
