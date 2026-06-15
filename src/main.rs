@@ -5,7 +5,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (self.0, Json(serde_json::json!({ "error": self.1 }))).into_response()
     }
+}
+
+async fn health() -> impl IntoResponse {
+    StatusCode::OK
 }
 
 async fn embed(
@@ -80,7 +84,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = Arc::new(EmbeddingClient::new(config)?);
     let state = AppState { client };
 
-    let app = Router::new().route("/embed", post(embed)).with_state(state);
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/embed", post(embed))
+        .with_state(state);
 
     let port_str = std::env::var("EMBEDDING_PORT").unwrap_or_else(|_| "3000".to_string());
     let port: u16 = port_str.parse().map_err(|_| {
