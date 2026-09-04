@@ -361,20 +361,24 @@ impl EmbeddingClient {
             sys.cgroup_limits().map(|limits| limits.free_memory),
         ) / (1024 * 1024);
 
-        if available_mb == 0 {
-            return 32;
-        }
-
-        // Per-text memory estimate for ONNX inference.  Attention matrices
-        // dominate: heads × seq² × 4 bytes.  For 768-dim BERT-like models
-        // (12 heads) processing ~1000-2000 token code chunks, attention alone
-        // is 50-200 MB per text.  The estimate below is conservative so the
-        // sub-batch stays small enough to prevent arena over-allocation.
-        let mb_per_text: u64 = if dimension >= 768 { 100 } else { 40 };
-        let budget_mb = available_mb / 2;
-        let max_batch = if gpu { 256 } else { 16 };
-        (budget_mb / mb_per_text).clamp(4, max_batch) as usize
+        sub_batch_for(available_mb, dimension, gpu)
     }
+}
+
+fn sub_batch_for(available_mb: u64, dimension: usize, gpu: bool) -> usize {
+    if available_mb == 0 {
+        return 32;
+    }
+
+    // Per-text memory estimate for ONNX inference.  Attention matrices
+    // dominate: heads × seq² × 4 bytes.  For 768-dim BERT-like models
+    // (12 heads) processing ~1000-2000 token code chunks, attention alone
+    // is 50-200 MB per text.  The estimate below is conservative so the
+    // sub-batch stays small enough to prevent arena over-allocation.
+    let mb_per_text: u64 = if dimension >= 768 { 100 } else { 40 };
+    let budget_mb = available_mb / 2;
+    let max_batch = if gpu { 256 } else { 16 };
+    (budget_mb / mb_per_text).clamp(1, max_batch) as usize
 }
 
 #[cfg(test)]
@@ -446,6 +450,25 @@ mod tests {
     #[test]
     fn memory_budget_is_capped_by_host_when_cgroup_is_unlimited() {
         assert_eq!(memory_budget(2 * GIB, Some(32 * GIB)), 2 * GIB);
+    }
+
+    #[test]
+    fn sub_batch_falls_back_when_memory_is_unknown() {
+        assert_eq!(sub_batch_for(0, 768, false), 32);
+    }
+
+    #[test]
+    fn sub_batch_never_exceeds_a_small_budget() {
+        // 200 MiB free -> 100 MiB budget -> one 100 MiB text, not four.
+        assert_eq!(sub_batch_for(200, 768, false), 1);
+        assert_eq!(sub_batch_for(1, 768, false), 1);
+        assert_eq!(sub_batch_for(200, 384, false), 2);
+    }
+
+    #[test]
+    fn sub_batch_is_capped_by_device() {
+        assert_eq!(sub_batch_for(64 * 1024, 768, false), 16);
+        assert_eq!(sub_batch_for(64 * 1024, 768, true), 256);
     }
 
     #[test]
