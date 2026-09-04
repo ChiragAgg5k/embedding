@@ -34,6 +34,27 @@ fn default_pool_size() -> usize {
         .unwrap_or(2)
 }
 
+/// Memory this process can still allocate before the kernel OOM-kills it.
+///
+/// `System::available_memory()` reports the host, which inside a container is
+/// the wrong number: a service started with `--memory=1g` on a 32 GB machine
+/// would size its pool for 32 GB, load several model instances, get killed,
+/// and restart in a loop. When a cgroup limit applies, the cgroup's free
+/// memory is the real ceiling, so take the smaller of the two.
+fn available_memory(sys: &sysinfo::System) -> u64 {
+    memory_budget(
+        sys.available_memory(),
+        sys.cgroup_limits().map(|limits| limits.free_memory),
+    )
+}
+
+fn memory_budget(host_available: u64, cgroup_free: Option<u64>) -> u64 {
+    match cgroup_free {
+        Some(cgroup_free) => host_available.min(cgroup_free),
+        None => host_available,
+    }
+}
+
 fn next_index(counter: &AtomicUsize, len: usize) -> usize {
     counter.fetch_add(1, Ordering::Relaxed) % len
 }
@@ -129,7 +150,7 @@ impl EmbeddingClient {
         // loading instance and measuring memory footprint
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
-        let mem_before_loading_model = sys.available_memory();
+        let mem_before_loading_model = available_memory(&sys);
 
         let has_gpu_providers = !config.execution_providers.is_empty();
 
@@ -149,7 +170,7 @@ impl EmbeddingClient {
             .map_err(|e| format!("warmup inference failed for {}: {}", model_name, e))?;
 
         sys.refresh_memory();
-        let memory_after_loading_model = sys.available_memory();
+        let memory_after_loading_model = available_memory(&sys);
         let per_instance_loaded =
             mem_before_loading_model.saturating_sub(memory_after_loading_model);
 
@@ -165,6 +186,16 @@ impl EmbeddingClient {
         // 60% of memory that was available before loading first model
         let budget = mem_before_loading_model * 6 / 10;
         let pool_size = if let Some(max_memory) = budget.checked_div(per_instance_bytes) {
+            if max_memory == 0 {
+                tracing::warn!(
+                    estimated_with_arena_mb = per_instance_bytes / (1024 * 1024),
+                    budget_mb = budget / (1024 * 1024),
+                    "A single {} instance is estimated to exceed the memory budget; \
+                     running with pool_size=1 but the process may be OOM-killed under load. \
+                     Raise the container memory limit or pick a smaller model.",
+                    model_name
+                );
+            }
             let max_memory = (max_memory as usize).max(1);
             let capped = max_memory.min(desired_pool_size);
             tracing::info!(
@@ -333,7 +364,7 @@ impl EmbeddingClient {
     fn compute_sub_batch(dimension: usize, gpu: bool) -> usize {
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
-        let available_mb = sys.available_memory() / (1024 * 1024);
+        let available_mb = available_memory(&sys) / (1024 * 1024);
 
         if available_mb == 0 {
             return 32;
@@ -403,6 +434,23 @@ mod tests {
         unsafe {
             std::env::set_var(k, v);
         }
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn memory_budget_uses_host_without_cgroup() {
+        assert_eq!(memory_budget(32 * GIB, None), 32 * GIB);
+    }
+
+    #[test]
+    fn memory_budget_is_capped_by_cgroup_limit() {
+        assert_eq!(memory_budget(32 * GIB, Some(GIB)), GIB);
+    }
+
+    #[test]
+    fn memory_budget_is_capped_by_host_when_cgroup_is_unlimited() {
+        assert_eq!(memory_budget(2 * GIB, Some(32 * GIB)), 2 * GIB);
     }
 
     #[test]
