@@ -354,16 +354,11 @@ impl EmbeddingClient {
 
     /// Compute sub-batch size based on available system memory.
     ///
-    /// Uses 50% of available RAM as a budget.  Falls back to 32 if sysinfo
-    /// reports 0.
+    /// Uses 50% of available RAM as a budget.
     /// When GPU is enabled, the upper clamp is raised to 256 (GPU VRAM can
     /// handle much larger batches than CPU).
     /// TODO: add here the config batch size
     fn compute_sub_batch(available_mb: u64, dimension: usize, gpu: bool) -> usize {
-        if available_mb == 0 {
-            return 32;
-        }
-
         // Per-text memory estimate for ONNX inference.  Attention matrices
         // dominate: heads × seq² × 4 bytes.  For 768-dim BERT-like models
         // (12 heads) processing ~1000-2000 token code chunks, attention alone
@@ -557,7 +552,7 @@ mod tests {
 
     #[test]
     fn compute_sub_batch_shrinks_to_fit_small_budgets() {
-        assert_eq!(EmbeddingClient::compute_sub_batch(0, 768, false), 32);
+        assert_eq!(EmbeddingClient::compute_sub_batch(0, 768, false), 1);
         // 200 MiB free -> 100 MiB budget -> one 100 MiB text, not four.
         assert_eq!(EmbeddingClient::compute_sub_batch(200, 768, false), 1);
         assert_eq!(
