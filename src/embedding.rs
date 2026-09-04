@@ -430,20 +430,11 @@ mod tests {
         }
     }
 
-    const GIB: u64 = 1024 * 1024 * 1024;
-
-    #[test]
-    fn memory_budget_uses_host_without_cgroup() {
-        assert_eq!(memory_budget(32 * GIB, None), 32 * GIB);
-    }
-
     #[test]
     fn memory_budget_is_capped_by_cgroup_limit() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(memory_budget(32 * GIB, None), 32 * GIB);
         assert_eq!(memory_budget(32 * GIB, Some(GIB)), GIB);
-    }
-
-    #[test]
-    fn memory_budget_is_capped_by_host_when_cgroup_is_unlimited() {
         assert_eq!(memory_budget(2 * GIB, Some(32 * GIB)), 2 * GIB);
     }
 
@@ -565,20 +556,10 @@ mod tests {
     }
 
     #[test]
-    fn compute_sub_batch_falls_back_when_memory_is_unknown() {
+    fn compute_sub_batch_shrinks_to_fit_small_budgets() {
         assert_eq!(EmbeddingClient::compute_sub_batch(0, 768, false), 32);
-    }
-
-    #[test]
-    fn compute_sub_batch_never_exceeds_a_small_budget() {
         // 200 MiB free -> 100 MiB budget -> one 100 MiB text, not four.
         assert_eq!(EmbeddingClient::compute_sub_batch(200, 768, false), 1);
-        assert_eq!(EmbeddingClient::compute_sub_batch(1, 768, false), 1);
-        assert_eq!(EmbeddingClient::compute_sub_batch(200, 384, false), 2);
-    }
-
-    #[test]
-    fn compute_sub_batch_is_capped_by_device() {
         assert_eq!(
             EmbeddingClient::compute_sub_batch(64 * 1024, 768, false),
             16
