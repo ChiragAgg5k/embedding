@@ -34,20 +34,6 @@ fn default_pool_size() -> usize {
         .unwrap_or(2)
 }
 
-/// Memory this process can still allocate before the kernel OOM-kills it.
-///
-/// `System::available_memory()` reports the host, which inside a container is
-/// the wrong number: a service started with `--memory=1g` on a 32 GB machine
-/// would size its pool for 32 GB, load several model instances, get killed,
-/// and restart in a loop. When a cgroup limit applies, the cgroup's free
-/// memory is the real ceiling, so take the smaller of the two.
-fn available_memory(sys: &sysinfo::System) -> u64 {
-    memory_budget(
-        sys.available_memory(),
-        sys.cgroup_limits().map(|limits| limits.free_memory),
-    )
-}
-
 fn memory_budget(host_available: u64, cgroup_free: Option<u64>) -> u64 {
     match cgroup_free {
         Some(cgroup_free) => host_available.min(cgroup_free),
@@ -150,7 +136,10 @@ impl EmbeddingClient {
         // loading instance and measuring memory footprint
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
-        let mem_before_loading_model = available_memory(&sys);
+        let mem_before_loading_model = memory_budget(
+            sys.available_memory(),
+            sys.cgroup_limits().map(|limits| limits.free_memory),
+        );
 
         let has_gpu_providers = !config.execution_providers.is_empty();
 
@@ -170,7 +159,10 @@ impl EmbeddingClient {
             .map_err(|e| format!("warmup inference failed for {}: {}", model_name, e))?;
 
         sys.refresh_memory();
-        let memory_after_loading_model = available_memory(&sys);
+        let memory_after_loading_model = memory_budget(
+            sys.available_memory(),
+            sys.cgroup_limits().map(|limits| limits.free_memory),
+        );
         let per_instance_loaded =
             mem_before_loading_model.saturating_sub(memory_after_loading_model);
 
@@ -364,7 +356,10 @@ impl EmbeddingClient {
     fn compute_sub_batch(dimension: usize, gpu: bool) -> usize {
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
-        let available_mb = available_memory(&sys) / (1024 * 1024);
+        let available_mb = memory_budget(
+            sys.available_memory(),
+            sys.cgroup_limits().map(|limits| limits.free_memory),
+        ) / (1024 * 1024);
 
         if available_mb == 0 {
             return 32;
